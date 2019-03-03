@@ -5,6 +5,7 @@ import sys
 import tensorflow as tf
 import numpy as np
 from tensorflow.python.ops import rnn_cell_impl
+from tensorflow.contrib.rnn.python.ops import core_rnn_cell
 
 from utils import createVocabulary
 from utils import loadVocabulary
@@ -26,7 +27,7 @@ parser.add_argument("--no_early_stop", action='store_false',dest='early_stop', h
 parser.add_argument("--patience", type=int, default=5, help="Patience to wait before stop.")
 
 #Model and Vocab
-parser.add_argument("--dataset", type=str, default=None, help="""Type 'atis' or 'snips' to use dataset provided by us or enter what ever you named your own dataset.
+parser.add_argument("--dataset", type=str, default="atis", help="""Type 'atis' or 'snips' to use dataset provided by us or enter what ever you named your own dataset.
                 Note, if you don't want to use this part, enter --dataset=''. It can not be None""")
 parser.add_argument("--model_path", type=str, default='./model', help="Path to save model.")
 parser.add_argument("--vocab_path", type=str, default='./vocab', help="Path to vocabulary files.")
@@ -92,7 +93,7 @@ def createModel(input_data, input_size, sequence_length, slot_size, intent_size,
     inputs = tf.nn.embedding_lookup(embedding, input_data)
 
     state_outputs, final_state = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, inputs, sequence_length=sequence_length, dtype=tf.float32)
-    
+
     final_state = tf.concat([final_state[0][0], final_state[0][1], final_state[1][0], final_state[1][1]], 1)
     state_outputs = tf.concat([state_outputs[0], state_outputs[1]], 2)
     state_shape = state_outputs.get_shape()
@@ -114,7 +115,9 @@ def createModel(input_data, input_size, sequence_length, slot_size, intent_size,
 
                 slot_inputs_shape = tf.shape(slot_inputs)
                 slot_inputs = tf.reshape(slot_inputs, [-1, attn_size])
-                y = rnn_cell_impl._linear(slot_inputs, attn_size, True)
+                #y = rnn_cell_impl._linear(slot_inputs, attn_size, True)
+                y = tf.layers.dense(slot_inputs, attn_size, use_bias=True, activation=None)
+                #y = core_rnn_cell._Linear(slot_inputs, attn_size, True)
                 y = tf.reshape(y, slot_inputs_shape)
                 y = tf.expand_dims(y, 2)
                 s = tf.reduce_sum(v * tf.tanh(hidden_features + y), [3])
@@ -134,7 +137,9 @@ def createModel(input_data, input_size, sequence_length, slot_size, intent_size,
             hidden_features = tf.nn.conv2d(hidden, k, [1, 1, 1, 1], "SAME")
             v = tf.get_variable("AttnV", [attn_size])
 
-            y = rnn_cell_impl._linear(intent_input, attn_size, True)
+            #y = rnn_cell_impl._linear(intent_input, attn_size, True)
+            y = tf.layers.dense(intent_input, attn_size, use_bias=True, activation=None)
+            #y = core_rnn_cell._Linear(intent_input, attn_size, True)
             y = tf.reshape(y, [-1, 1, 1, attn_size])
             s = tf.reduce_sum(v*tf.tanh(hidden_features + y), [2,3])
             a = tf.nn.softmax(s)
@@ -148,7 +153,10 @@ def createModel(input_data, input_size, sequence_length, slot_size, intent_size,
                 intent_output = d
 
         with tf.variable_scope('slot_gated'):
-            intent_gate = rnn_cell_impl._linear(intent_output, attn_size, True)
+            #intent_gate = rnn_cell_impl._linear(intent_output, attn_size, True)
+            intent_gate = tf.layers.dense(intent_output, attn_size, use_bias=True, activation=None)
+
+            #intent_gate = core_rnn_cell._Linear(intent_output, attn_size, True)
             intent_gate = tf.reshape(intent_gate, [-1, 1, intent_gate.get_shape()[1].value])
             v1 = tf.get_variable("gateV", [attn_size])
             if remove_slot_attn == False:
@@ -165,10 +173,12 @@ def createModel(input_data, input_size, sequence_length, slot_size, intent_size,
             slot_output = tf.concat([slot_gate, slot_inputs], 1)
 
     with tf.variable_scope('intent_proj'):
-        intent = rnn_cell_impl._linear(intent_output, intent_size, True)
+        #intent = rnn_cell_impl._linear(intent_output, intent_size, True)
+        intent = tf.layers.dense(intent_output, intent_size, use_bias=True, activation=None)
 
     with tf.variable_scope('slot_proj'):
-        slot = rnn_cell_impl._linear(slot_output, slot_size, True)
+        #slot = rnn_cell_impl._linear(slot_output, slot_size, True)
+        slot = tf.layers.dense(slot_output, slot_size, use_bias=True, activation=None)
 
     outputs = [slot, intent]
     return outputs

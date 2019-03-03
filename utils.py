@@ -23,27 +23,27 @@ def createVocabulary(input_path, output_path, no_pad=False):
                     vocab[w] += 1
                 else:
                     vocab[w] = 1
-        if no_pad == False:
+        if no_pad == False: # need pad
             vocab = ['_PAD', '_UNK'] + sorted(vocab, key=vocab.get, reverse=True)
         else:
             vocab = ['_UNK'] + sorted(vocab, key=vocab.get, reverse=True)
 
         for v in vocab:
-            out.write(v+'\n')
+            out.write(v+'\n') # 每行一个单词
 
 def loadVocabulary(path):
     if not isinstance(path, str):
         raise TypeError('path should be a string')
 
-    vocab = []
-    rev = []
+    word2id = []
+    word_array = []
     with open(path) as fd:
         for line in fd:
             line = line.rstrip('\r\n')
-            rev.append(line)
-        vocab = dict([(x,y) for (y,x) in enumerate(rev)])
+            word_array.append(line)
+        word2id = dict([(x,y) for (y,x) in enumerate(word_array)])
 
-    return {'vocab': vocab, 'rev': rev}
+    return {'vocab': word2id, 'rev': word_array}
 
 def sentenceToIds(data, vocab):
     if not isinstance(vocab, dict):
@@ -293,3 +293,6 @@ class DataProcessor(object):
             slot_weight.append(weight)
         slot_weight = np.array(slot_weight)
         return in_data, slot_data, slot_weight, length, intents, in_seq, slot_seq, intent_seq
+
+def load_embedding(embedding_path):
+    return np.load(embedding_path)
