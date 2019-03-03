@@ -340,18 +340,18 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             data_processor.close()
             data_processor = None
             epochs += 1
-            logging.info('Training step: ' + str(step))
+            logging.info('Train:')
+            logging.info('Step: ' + str(step))
             logging.info('Epochs: ' + str(epochs))
             logging.info('Loss: ' + str(loss / num_loss))
             num_loss = 0
             loss = 0.0
 
             save_path = os.path.join(arg.model_path, 'train_step_' + str(step) + '_epochs_' + str(epochs) + '.ckpt')
-            print("save model to:", save_path)
+            logging.info("step:{} save model to:{}".format(step,save_path))
             saver.save(sess, save_path)
 
             def run_validate(in_path, slot_path, intent_path):
-                print("run validate...")
                 data_processor_valid = DataProcessor(in_path,
                                                      slot_path,
                                                      intent_path,
@@ -441,6 +441,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                        slot_outputs, correct_slots, input_words, gate_seq
 
 
+            logging.info(' ')
             logging.info('Valid:') # 即通常所谓的dev集
             epoch_valid_slot, epoch_valid_intent, epoch_semantic_acc_score, \
             valid_pred_intent, valid_correct_intent, valid_pred_slot, \
@@ -450,6 +451,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 os.path.join(full_valid_path, arg.slot_file),
                 os.path.join(full_valid_path, arg.intent_file))
 
+            logging.info(' ')
             logging.info('Test:')
             epoch_test_slot, epoch_test_intent, epoch_test_err, \
             test_pred_intent, test_correct_intent, test_pred_slot, \
@@ -472,3 +474,4 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 if no_improve > arg.patience:
                     print("no improve for last {} epoch, early stop!".format(arg.patience))
                     break
+            logging.info('='*20)
