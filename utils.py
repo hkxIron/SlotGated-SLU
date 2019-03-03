@@ -45,10 +45,10 @@ def loadVocabulary(path):
 
     return {'vocab': word2id, 'rev': word_array}
 
-def sentenceToIds(data, vocab):
-    if not isinstance(vocab, dict):
+def sentenceToIds(data, word2IdVocab):
+    if not isinstance(word2IdVocab, dict):
         raise TypeError('vocab should be a dict that contains vocab and rev')
-    vocab = vocab['vocab']
+    word2IdVocab = word2IdVocab['vocab']
     if isinstance(data, str):
         words = data.split()
     elif isinstance(data, list):
@@ -58,9 +58,10 @@ def sentenceToIds(data, vocab):
 
     ids = []
     for w in words:
+        # 将所有的数字转成0
         if str.isdigit(w) == True:
             w = '0'
-        ids.append(vocab.get(w, vocab['_UNK']))
+        ids.append(word2IdVocab.get(w, word2IdVocab['_UNK']))
 
     return ids
 
@@ -229,8 +230,8 @@ class DataProcessor(object):
         self.__fd_intent.close()
 
     def get_batch(self, batch_size):
-        in_data = []
-        slot_data = []
+        in_data_padded = []
+        slot_data_padded = []
         slot_weight = []
         length = []
         intents = []
@@ -267,8 +268,9 @@ class DataProcessor(object):
             batch_slot.append(np.array(slot))
             length.append(len(inp))
             intents.append(intent[0])
+            
             if len(inp) != len(slot):
-                print(iii,sss)
+                print(iii, sss)
                 print(inp,slot)
                 exit(0)
             if len(inp) > max_len:
@@ -279,20 +281,21 @@ class DataProcessor(object):
         #print(max_len)
         #print('A'*20)
         for i, s in zip(batch_in, batch_slot):
-            in_data.append(padSentence(list(i), max_len, self.__in_vocab))
-            slot_data.append(padSentence(list(s), max_len, self.__slot_vocab))
+            in_data_padded.append(padSentence(list(i), max_len, self.__in_vocab))
+            slot_data_padded.append(padSentence(list(s), max_len, self.__slot_vocab))
             #print(s)
-        in_data = np.array(in_data)
-        slot_data = np.array(slot_data)
-        #print(in_data)
-        #print(slot_data)
-        #print(type(slot_data))
-        for s in slot_data:
+        in_data_padded = np.array(in_data_padded)
+        slot_data_padded = np.array(slot_data_padded)
+        #print(in_data_padded)
+        #print(slot_data_padded)
+        #print(type(slot_data_padded))
+        for s in slot_data_padded:
+            # 所谓的weight即为mask
             weight = np.not_equal(s, np.zeros(s.shape))
             weight = weight.astype(np.float32)
             slot_weight.append(weight)
         slot_weight = np.array(slot_weight)
-        return in_data, slot_data, slot_weight, length, intents, in_seq, slot_seq, intent_seq
+        return in_data_padded, slot_data_padded, slot_weight, length, intents, in_seq, slot_seq, intent_seq
 
 def load_embedding(embedding_path):
     return np.load(embedding_path)

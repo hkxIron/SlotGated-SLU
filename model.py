@@ -13,6 +13,7 @@ def createModel(input_data,
                 layer_size=128,
                 isTraining=True,
                 embedding_path=None,
+                use_batch_crossent=True
                 ):
 
     #cell_fw = tf.contrib.rnn.BasicLSTMCell(layer_size)
@@ -264,18 +265,18 @@ def createModel(input_data,
 
     with tf.variable_scope('intent_proj'):
         # intent_output:[batch, hidden_size* 2 + hidden_size * 4]
-        # intent:[batch, intent_size]
-        intent = core_rnn_cell._linear(intent_output, output_size=intent_size, bias=True)
+        # intent_logits:[batch, intent_size]
+        intent_logits = core_rnn_cell._linear(intent_output, output_size=intent_size, bias=True)
 
     with tf.variable_scope('slot_proj'):
         # slot_output:[batch * input_sequence_length, hidden_size * 4]
-        # slot:[batch * input_sequence_length, slot_size]
-        slot = core_rnn_cell._linear(slot_output, output_size=slot_size, bias=True)
-        if use_crf:
+        # slot_logits:[batch * input_sequence_length, slot_size]
+        slot_logits = core_rnn_cell._linear(slot_output, output_size=slot_size, bias=True)
+        if use_crf or use_batch_crossent:
             # sequence_outputs:[batch, input_sequence_length, hidden_size* 2]
             nstep = tf.shape(sequence_outputs)[1]
-            # slot:[batch, input_sequence_length, slot_size]
-            slot = tf.reshape(slot, [-1, nstep, slot_size])
+            # slot_logits:[batch, input_sequence_length, slot_size]
+            slot_logits = tf.reshape(slot_logits, [-1, nstep, slot_size])
 
-    return [slot, intent]
+    return [slot_logits, intent_logits]
 

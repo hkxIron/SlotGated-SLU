@@ -222,6 +222,11 @@ for p in params:
     if 'slot_' in p.name or 'bidirectional_rnn' in p.name or 'embedding' in p.name:
         slot_params.append(p)
 
+print("=========================")
+print("slot params[0].name:", slot_params[0].name)
+print("slot params:", slot_params)
+print("intent_params:", intent_params)
+
 gradients_slot = tf.gradients(slot_loss, slot_params)
 gradients_intent = tf.gradients(intent_loss, intent_params)
 
