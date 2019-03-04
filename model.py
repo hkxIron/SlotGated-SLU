@@ -248,8 +248,7 @@ def createModel(input_data,
 
             if add_final_state_to_intent == True:
                 """
-                c_I = c_i + h_T, T代表最后时刻
-                c_intent = context_intent + encoder_final_state
+                c_I = c_i + h_T, T代表最后时刻 encoder_final_state
                 """
                 # intent_input:[batch, hidden_size * 4]
                 # intent_context_hidden:[batch, hidden_size*2]
@@ -261,7 +260,7 @@ def createModel(input_data,
                 intent_output = intent_context_hidden
 
         """
-        slot_gate=v*tanh(c_i_slot + W*c_intent)
+        slot_gate=v*tanh(c_i_slot + W*c_I)
         """
         with tf.variable_scope('slot_gated'):
             # intent_gate:[batch, hidden_size * 2]
@@ -274,7 +273,7 @@ def createModel(input_data,
             if not remove_slot_attn: # 需要slot attention
                 """
                 需要slot attention
-                slot_context_hidden:c_i_slot, intent_gate:W*c_intent
+                slot_context_hidden:c_i_slot, intent_gate:W*c_I
                 """
                 # slot_context_hidden: [batch, input_sequence_length, hidden_size * 2]
                 # intent_gate:[batch, 1, hidden_size * 2]
