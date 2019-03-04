@@ -61,9 +61,12 @@ def createModel(input_data,
     print("final_state:", final_state)
     print("squence_outputs:", sequence_outputs)
 
-    # tensor.get_shape()返回的是tuple
+    # tensor.get_shape()返回的是tuple,不是tensor
     sequence_output_shape = sequence_outputs.get_shape() # [batch, input_sequence_length, hidden_size* 2]
 
+    """
+    sequence output作为attention的输入
+    """
     with tf.variable_scope('attention'):
         # state_outputs:[batch, input_sequence_length, hidden_size* 2]
         slot_inputs = sequence_outputs
@@ -84,25 +87,33 @@ def createModel(input_data,
                 """
                 W_{he}*h_k:用的是卷积实现
                 """
-                # attn_size = hidden size * 2
+                # attn_size = hidden_size * 2
                 attn_size = sequence_output_shape[2].value
                 # [batch, height=input_sequence_length, width=1, channel=hidden_size * 2]
                 hidden_input_conv = tf.expand_dims(sequence_outputs, axis=2)
                 # W_he: [filter_height=1, filter_width=1, in_channels=hidden*2, out_channels=hidden*2], 注意: 1*1的核
                 W_he = tf.get_variable("slot_AttnW", shape=[1, 1, attn_size, attn_size])
-                # hidden_features:[batch, height=input_sequence_length, width=1, channel=hidden_size * 2]
                 # 物理意义:对hidden的各维之间进行卷积,等价于: W_{he}*h_k,不过不太清楚为何用卷积来实现
+                # hidden_features:[batch, height=input_sequence_length, width=1, channel=hidden_size * 2]
                 hidden_features = tf.nn.conv2d(input=hidden_input_conv, filter=W_he, strides=[1, 1, 1, 1], padding="SAME")
+                # hidden_features:[batch, 1,input_sequence_length, hidden_size * 2]
+                hidden_features = tf.transpose(hidden_features, perm=[0,2,1,3])
 
+                """
+                # 下面是原作者的写法,比较冗余
                 origin_shape = tf.shape(sequence_outputs) # 返回的是tensor
                 # hidden_features:[batch,input_sequence_length,hidden_size * 2]
                 hidden_features = tf.reshape(hidden_features, origin_shape)
                 # hidden_features:[batch, 1,input_sequence_length, hidden_size * 2]
                 hidden_features = tf.expand_dims(hidden_features, 1)
+                """
 
                 """
                 W_{ie}*h_i:用的是线性映射 _linear(), W_{ie}未显式声明,在Linear函数中
                 """
+
+                """
+                # 下面的代码比较啰嗦
                 # [batch, input_sequence_length, hidden_size* 2]
                 slot_inputs_shape = tf.shape(slot_inputs) #返回tensor
                 # slot_inputs:[batch * input_sequence_length, hidden_size * 2]
@@ -115,6 +126,18 @@ def createModel(input_data,
                 y = tf.reshape(y, slot_inputs_shape)
                 # [batch , input_sequence_length, 1, hidden_size* 2]
                 y = tf.expand_dims(y, 2)
+                print("layer_y:", y)
+                """
+
+                # sequence_output:[batch, input_sequence_length, hidden_size* 2]
+                # slot_inputs:[batch * input_sequence_length, hidden_size * 2]
+                slot_inputs = tf.reshape(sequence_outputs, [-1, attn_size])
+                # y: [batch , input_sequence_length, hidden_size* 2]
+                y = tf.layers.dense(inputs=sequence_outputs, units=attn_size, activation=None, use_bias=True)
+                # [batch , input_sequence_length, 1, hidden_size* 2]
+                y = tf.expand_dims(y, 2)
+                print("layer_y:", y)
+
 
                 """
                 e_{i,k}=V^T*tanh(W_{he}*h_k+W_{ie}*h_i)
@@ -127,14 +150,18 @@ def createModel(input_data,
                 # [batch , nstep, nstep] = [batch, 1, nstep, hidden_size*2] + [batch , nstep, 1, hidden_size * 2]
                 # hidden_features:[batch, 1,input_sequence_length, hidden_size * 2]
                 # y:[batch, input_sequence_length,1 , hidden_size* 2]
-                # bahdanauAdd:[batch, input_sequence_length, input_sequence_length, hidden_size* 2]
+                # bahdanau_activate:[batch, input_sequence_length, input_sequence_length, hidden_size* 2]
                 # 有维度为1的,会自动广播
                 bahdanau_activate = tf.tanh(hidden_features + y)
                 # V:[attn_size=hidden_size*2]
                 V = tf.get_variable("slot_AttnV", [attn_size])
-                # logit_i_k:[batch, input_sequence_length, input_sequence_length, hidden_size* 2]
-                #   =>[batch, input_sequence_length, input_sequence_length]
-                logit_i_k = tf.reduce_sum(V * bahdanau_activate, axis=[3]) # 注意:这里是点乘,不是矩阵相乘
+                # v_bahdanau:[batch, input_sequence_length, input_sequence_length, hidden_size* 2]
+                v_bahdanau = V * bahdanau_activate #  注意:此处是一阶与4阶相乘,注意:这里是点乘,不是矩阵相乘
+                # logit_i_k:[batch, input_sequence_length, input_sequence_length]
+                logit_i_k = tf.reduce_sum(v_bahdanau, axis=[3])
+                # 这里与上一步结合起来,就是:e(i,k)=v^T*tanh(w1*hk+w2*hi), (n*1)^T *(n*1)将向量映射成分数
+
+
                 """
                 alpha_{i,j} = softmax(e{i,j})
                 c_i = sum_{j}(alpha_{i,j}*h_j)
@@ -146,14 +173,15 @@ def createModel(input_data,
                 # hidden=[batch, 1, input_sequence_length, hidden_size* 2]
                 hidden = tf.expand_dims(sequence_outputs, axis=1)
                 # score_i_k:[batch, input_sequence_length, input_sequence_length, 1]
-                # hidden:   [batch, 1, input_sequence_length, hidden_size* 2]
-                # slot_attentioned_hidden: [batch, input_sequence_length, hidden_size * 2]
-                slot_attentioned_hidden = tf.reduce_sum(score_i_k * hidden, axis=[2])
+                # hidden:[batch, 1, input_sequence_length, hidden_size* 2]
+                # slot_context_hidden: [batch, input_sequence_length, hidden_size * 2]
+                slot_context_hidden = tf.reduce_sum(score_i_k * hidden, axis=[2])
         else: # 不需attention
             # attn_size = hidden size * 2
             attn_size = sequence_output_shape[2].value
             # [batch*input_sequence_length, hidden_size* 2]
             slot_inputs = tf.reshape(slot_inputs, [-1, attn_size])
+
 
         # ===============intent attention ============================
         """
@@ -212,71 +240,101 @@ def createModel(input_data,
             score_i_k = tf.expand_dims(score_i_k, axis=-1)
             # score_i_k:[batch, input_sequence_length, 1, 1]
             score_i_k = tf.expand_dims(score_i_k, axis=-1)
+            # 注意: c_intent 为hidden在各时间长度上进行加权平均
+            # score_i_k:[batch, input_sequence_length, 1, 1]
             # hidden:[batch, input_sequence_length, 1, hidden_size*2]
-            # intent_attentioned_hidden:[batch, hidden_size*2]
-            intent_attentioned_hidden = tf.reduce_sum(score_i_k * hidden, axis=[1, 2])
+            # intent_context_hidden:[batch, hidden_size*2]
+            intent_context_hidden = tf.reduce_sum(score_i_k * hidden, axis=[1, 2])
 
             if add_final_state_to_intent == True:
+                """
+                c_I = c_i + h_T, T代表最后时刻
+                c_intent = context_intent + encoder_final_state
+                """
                 # intent_input:[batch, hidden_size * 4]
-                # intent_attentioned_hidden:[batch, hidden_size*2]
+                # intent_context_hidden:[batch, hidden_size*2]
                 # intent_output:[batch, hidden_size* 2 + hidden_size * 4]
-                intent_output = tf.concat([intent_attentioned_hidden, intent_input], 1)
+                intent_output = tf.concat([intent_context_hidden, intent_input], 1)
             else:
-                # intent_attentioned_hidden:[batch, hidden_size*2]
-                intent_output = intent_attentioned_hidden
+                # c_intent = context_intent
+                # intent_context_hidden:[batch, hidden_size*2]
+                intent_output = intent_context_hidden
 
+        """
+        slot_gate=v*tanh(c_i_slot + W*c_intent)
+        """
         with tf.variable_scope('slot_gated'):
             # intent_gate:[batch, hidden_size * 2]
-            intent_gate = core_rnn_cell._linear(intent_output, output_size=attn_size, bias=True)
+            intent_gate = core_rnn_cell._linear(intent_output, output_size=attn_size, bias=True) # W*c_intent
             embed_size = intent_gate.get_shape()[1].value
             # [batch, 1, hidden_size * 2]
             intent_gate = tf.reshape(intent_gate, [-1, 1, embed_size])
             # V_gate:[hidden_size*2]
             V_gate = tf.get_variable("gateV", [attn_size])
             if not remove_slot_attn: # 需要slot attention
-                # slot_attentioned_hidden: [batch, input_sequence_length, hidden_size * 2]
+                """
+                需要slot attention
+                slot_context_hidden:c_i_slot, intent_gate:W*c_intent
+                """
+                # slot_context_hidden: [batch, input_sequence_length, hidden_size * 2]
                 # intent_gate:[batch, 1, hidden_size * 2]
                 # slot_gate:[batch, input_sequence_length, hidden_size * 2]
-                slot_gate = V_gate * tf.tanh(slot_attentioned_hidden + intent_gate)
+                slot_gate = V_gate * tf.tanh(slot_context_hidden + intent_gate)
             else:
+                """
+                不需要slot attention,用原始的hidden输入
+                """
                 # sequence_outputs:[batch, input_sequence_length, hidden_size * 2]
                 # intent_gate:[batch, 1, hidden_size * 2]
                 # slot_gate:[batch, input_sequence_length, hidden_size * 2]
                 slot_gate = V_gate * tf.tanh(sequence_outputs + intent_gate)
-            # slot_gate:[batch, input_sequence_length]
-            slot_gate = tf.reduce_sum(slot_gate, axis=[2])
             # slot_gate:[batch, input_sequence_length, 1]
-            slot_gate = tf.expand_dims(slot_gate, -1)
+            slot_gate = tf.reduce_sum(slot_gate, axis=[2], keep_dims=True)
+
+            """
+            h_i+C_i*slot_gate
+            """
             if not remove_slot_attn: # 需要slot attention
-                # slot_attentioned_hidden: [batch, input_sequence_length, hidden_size * 2]
+                # slot_context_hidden: [batch, input_sequence_length, hidden_size * 2]
                 # slot_gate:[batch, input_sequence_length, 1]
-                # slot_gate:[batch, input_sequence_length, hidden_size* 2]
-                slot_gate = slot_attentioned_hidden * slot_gate
+                # context_slot_gate:[batch, input_sequence_length, hidden_size* 2]
+                context_slot_gate = slot_context_hidden * slot_gate
             else:
                 # sequence_outputs:[batch, input_sequence_length, hidden_size* 2]
-                # slot_gate:[batch, input_sequence_length, hidden_size* 2]
-                slot_gate = sequence_outputs * slot_gate
-            # slot_gate:[batch * input_sequence_length, attn_size=hidden_size*2]
-            slot_gate = tf.reshape(slot_gate, [-1, attn_size])
-            # slot_gate:[batch * input_sequence_length, attn_size=hidden_size*2]
+                # context_slot_gate:[batch, input_sequence_length, hidden_size* 2]
+                context_slot_gate = sequence_outputs * slot_gate
+            # context_slot_gate:[batch * input_sequence_length, attn_size=hidden_size*2]
+            context_slot_gate = tf.reshape(context_slot_gate, [-1, attn_size])
+            # context_slot_gate:[batch * input_sequence_length, attn_size=hidden_size*2]
             # slot_inputs:[batch * input_sequence_length, hidden_size * 2]
             # slot_output:[batch * input_sequence_length, hidden_size * 4]
-            slot_output = tf.concat([slot_gate, slot_inputs], 1)
+            slot_output = tf.concat([context_slot_gate, slot_inputs], axis=1)
 
-    with tf.variable_scope('intent_proj'):
-        # intent_output:[batch, hidden_size* 2 + hidden_size * 4]
-        # intent_logits:[batch, intent_size]
-        intent_logits = core_rnn_cell._linear(intent_output, output_size=intent_size, bias=True)
-
+    """
+    注意:上面 slot_output与paper中的公式稍有不同,此处是将h_i, C_i*slot_gate concat起来,而非相加
+    y_i_slot = softmax(W_hy(h_i+C_i*slot_gate))
+    or 
+    y_i_slot = crf(W_hy(h_i+C_i*slot_gate))
+    """
     with tf.variable_scope('slot_proj'):
         # slot_output:[batch * input_sequence_length, hidden_size * 4]
         # slot_logits:[batch * input_sequence_length, slot_size]
+        # linear里的矩阵为论文中:W_s{hy}
         slot_logits = core_rnn_cell._linear(slot_output, output_size=slot_size, bias=True)
         if use_crf or use_batch_crossent:
             # sequence_outputs:[batch, input_sequence_length, hidden_size* 2]
             nstep = tf.shape(sequence_outputs)[1]
             # slot_logits:[batch, input_sequence_length, slot_size]
             slot_logits = tf.reshape(slot_logits, [-1, nstep, slot_size])
+
+    """
+    y_i_slot = softmax(W_hy(c_i + h_T))
+    """
+    with tf.variable_scope('intent_proj'):
+        # intent_output:[batch, hidden_size* 2 + hidden_size * 4]
+        # intent_logits:[batch, intent_size]
+        # linear里的矩阵为论文中:W_I{hy}
+        intent_logits = core_rnn_cell._linear(intent_output, output_size=intent_size, bias=True)
 
     return [slot_logits, intent_logits]
 

@@ -296,7 +296,14 @@ gpu_options = tf.GPUOptions(allow_growth=True)
 
 # Start Training
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
-    sess.run(tf.global_variables_initializer())
+    ckpt = tf.train.get_checkpoint_state(arg.model_path)
+    if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
+        print('Reloading model parameters..', ckpt.model_checkpoint_path)
+        saver.restore(sess, ckpt.model_checkpoint_path)
+    else:
+        print('Created new model parameters..')
+        sess.run(tf.global_variables_initializer())
+    #sess.run(tf.global_variables_initializer())
     logging.info('Training Start ...')
 
     epochs = 0
