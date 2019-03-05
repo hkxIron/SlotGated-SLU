@@ -85,7 +85,7 @@ def createModel(input_data,
                 """
 
                 """
-                W_{he}*h_k:用的是卷积实现
+                hidden_features = W_{he}*h_k:用的是卷积实现
                 """
                 # attn_size = hidden_size * 2
                 attn_size = sequence_output_shape[2].value
@@ -109,10 +109,6 @@ def createModel(input_data,
                 """
 
                 """
-                W_{ie}*h_i:用的是线性映射 _linear(), W_{ie}未显式声明,在Linear函数中
-                """
-
-                """
                 # 下面的代码比较啰嗦
                 # [batch, input_sequence_length, hidden_size* 2]
                 slot_inputs_shape = tf.shape(slot_inputs) #返回tensor
@@ -129,6 +125,10 @@ def createModel(input_data,
                 print("layer_y:", y)
                 """
 
+
+                """
+                y = W_{ie}*h_i:用的是线性映射 _linear(), W_{ie}未显式声明,在Linear函数中
+                """
                 # sequence_output:[batch, input_sequence_length, hidden_size* 2]
                 # slot_inputs:[batch * input_sequence_length, hidden_size * 2]
                 slot_inputs = tf.reshape(sequence_outputs, [-1, attn_size])
@@ -199,7 +199,7 @@ def createModel(input_data,
             """
 
             """
-            W_{he}*h_k:用的是卷积实现
+            hidden_features = W_{he}*h_k:用的是卷积实现
             """
             # W_he: [filter_height=1, filter_width=1, in_channels=hidden*2, out_channels=hidden*2], 注意: 1*1的核
             W_he = tf.get_variable("intent_AttnW", shape=[1, 1, attn_size, attn_size]) # 注意:此处与 slot_attention中用的是相同的attention
@@ -210,7 +210,7 @@ def createModel(input_data,
 
 
             """
-            W_{ie}*h_i:用的是线性映射 _linear() ,W_{ie}未显式声明,在Linear函数中
+            y = W_{ie}*h_i:用的是线性映射 _linear() ,W_{ie}未显式声明,在Linear函数中
             """
             # intent_input:[batch, hidden_size*4]
             # y: [batch, attn_size=hidden_size*2]
@@ -274,6 +274,9 @@ def createModel(input_data,
                 """
                 需要slot attention
                 slot_context_hidden:c_i_slot, intent_gate:W*c_I
+                
+                论文中公式(6):
+                g=sum(v*tanh(c_i + W*c^I)) 
                 """
                 # slot_context_hidden: [batch, input_sequence_length, hidden_size * 2]
                 # intent_gate:[batch, 1, hidden_size * 2]
@@ -282,7 +285,11 @@ def createModel(input_data,
             else:
                 """
                 不需要slot attention,用原始的hidden输入
+                论文中公式(8):
+                g=sum(v*tanh(h_i + W*c^I)) 
+                
                 """
+                # V_gate:[hidden_size*2]
                 # sequence_outputs:[batch, input_sequence_length, hidden_size * 2]
                 # intent_gate:[batch, 1, hidden_size * 2]
                 # slot_gate:[batch, input_sequence_length, hidden_size * 2]
@@ -290,15 +297,24 @@ def createModel(input_data,
             # slot_gate:[batch, input_sequence_length, 1]
             slot_gate = tf.reduce_sum(slot_gate, axis=[2], keep_dims=True)
 
+
             """
             h_i+C_i*slot_gate
             """
             if not remove_slot_attn: # 需要slot attention
+                """
+                论文中公式(7):
+                y_i(slot)=softmax(W_hy(hi+c_i*slot_gate))
+                """
                 # slot_context_hidden: [batch, input_sequence_length, hidden_size * 2]
                 # slot_gate:[batch, input_sequence_length, 1]
                 # context_slot_gate:[batch, input_sequence_length, hidden_size* 2]
                 context_slot_gate = slot_context_hidden * slot_gate
             else:
+                """
+                论文中公式(9):
+                y_i(slot)=softmax(W_hy(hi+h_i*slot_gate))
+                """
                 # sequence_outputs:[batch, input_sequence_length, hidden_size* 2]
                 # context_slot_gate:[batch, input_sequence_length, hidden_size* 2]
                 context_slot_gate = sequence_outputs * slot_gate
@@ -311,9 +327,10 @@ def createModel(input_data,
 
     """
     注意:上面 slot_output与paper中的公式稍有不同,此处是将h_i, C_i*slot_gate concat起来,而非相加
-    y_i_slot = softmax(W_hy(h_i+C_i*slot_gate))
+    
+    y_i(slot) = softmax(W_hy(h_i+C_i*slot_gate))
     or 
-    y_i_slot = crf(W_hy(h_i+C_i*slot_gate))
+    y_i(slot) = crf(W_hy(h_i+C_i*slot_gate))
     """
     with tf.variable_scope('slot_proj'):
         # slot_output:[batch * input_sequence_length, hidden_size * 4]
@@ -327,7 +344,7 @@ def createModel(input_data,
             slot_logits = tf.reshape(slot_logits, [-1, nstep, slot_size])
 
     """
-    y_i_slot = softmax(W_hy(c_i + h_T))
+    y(intent) = softmax(W_hy(c_I + h_T))
     """
     with tf.variable_scope('intent_proj'):
         # intent_output:[batch, hidden_size* 2 + hidden_size * 4]
