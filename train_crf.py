@@ -18,7 +18,7 @@ parser.add_argument("--num_units", type=int, default=64, help="Network size.", d
 parser.add_argument("--model_type", type=str, default='full', help="""full(default) | intent_only
                                                                     full: full attention model
                                                                     intent_only: intent attention model""")
-parser.add_argument("--use_crf", type="bool", default="true", help="""use crf for seq labeling""")
+parser.add_argument("--use_crf", type="bool", default="false", help="""use crf for seq labeling""")
 parser.add_argument("--cell", type=str, default='gru', help="""rnn cell""")
 
 # Training Environment
@@ -98,7 +98,7 @@ slot_labels = tf.placeholder(tf.int32, [None, None], name='slots') # [batch, inp
 slot_weights = tf.placeholder(tf.float32, [None, None], name='slot_weights') # [batch, input_sequence_length]
 intent_label = tf.placeholder(tf.int32, [None], name='intent') # [batch]
 
-use_batch_crossent = True
+use_batch_crossent = False
 with tf.variable_scope('model'):
     print("create train model")
     training_outputs = createModel(input_data,
@@ -226,23 +226,33 @@ clipped_gradients_intent, gradient_norm_intent = tf.clip_by_global_norm(gradient
 update_slot = opt.apply_gradients(zip(clipped_gradients_slot, slot_params))
 update_intent = opt.apply_gradients(zip(clipped_gradients_intent, intent_params), global_step=global_step)
 
-training_outputs = [global_step, slot_loss, update_intent, update_slot, gradient_norm_intent, gradient_norm_slot]
-inputs = [input_data, sequence_length, slot_labels, slot_weights, intent_label]
+training_outputs = [global_step,
+                    slot_loss,
+                    update_intent,
+                    update_slot,
+                    gradient_norm_intent,
+                    gradient_norm_slot]
+
+inputs = [input_data,
+          sequence_length,
+          slot_labels,
+          slot_weights,
+          intent_label]
 
 # Create Inference Model
 with tf.variable_scope('model', reuse=True):
     print("create infer model")
     inference_output = createModel(input_data,
-                                        len(in_vocab['vocab']),
-                                        sequence_length,
-                                        len(slot_vocab['vocab']),
-                                        len(intent_vocab['vocab']),
-                                        remove_slot_attn,
-                                        add_final_state_to_intent,
-                                        use_crf=arg.use_crf,
-                                        layer_size=arg.layer_size,
-                                        use_batch_crossent=use_batch_crossent,
-                                        isTraining=False)
+                                   len(in_vocab['vocab']),
+                                   sequence_length,
+                                   len(slot_vocab['vocab']),
+                                   len(intent_vocab['vocab']),
+                                   remove_slot_attn,
+                                   add_final_state_to_intent,
+                                   use_crf=arg.use_crf,
+                                   layer_size=arg.layer_size,
+                                   use_batch_crossent=use_batch_crossent,
+                                   isTraining=False)
 
 # slot_output_logits:[batch * input_sequence_length, slot_size]
 # slot_output_logits_crf or use_batch_crossent:[batch, input_sequence_length, slot_size]
@@ -273,11 +283,11 @@ if arg.use_crf:
                                                                    sequence_length=sequence_length)
 elif use_batch_crossent:
     # inference_slot_logits:[batch, input_sequence_length, slot_size]
-    # inference_slot_output:[batch, input_sequence_length]
+    # inference_slot_output:[batch, input_sequence_length,slot_size]
     inference_slot_output = tf.nn.softmax(inference_slot_logits, name='slot_output')
 else:
     # inference_slot_logits:[batch*input_sequence_length, slot_size]
-    # inference_slot_output:[batch*input_sequence_length]
+    # inference_slot_output:[batch*input_sequence_length, slot_size]
     inference_slot_output = tf.nn.softmax(inference_slot_logits, name='slot_output')
 
 # intent output
@@ -285,7 +295,7 @@ else:
 # inference_intent_output:[batch, intent_size]
 inference_intent_output = tf.nn.softmax(inference_intent_logits, name='intent_output')
 
-inference_output_list = [inference_intent_output, inference_slot_output]
+#inference_output_list = [inference_intent_output, inference_slot_output]
 inference_inputs = [input_data, sequence_length]
 
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
@@ -381,23 +391,27 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         break
                     feed_dict = {input_data.name: in_data,
                                  sequence_length.name: length}
-                    [infer_intent_out, infer_slot_out] = sess.run(inference_output_list, feed_dict)
+                    [infer_intent_out, infer_slot_out] = sess.run([inference_intent_output, inference_slot_output],
+                                                                  feed_dict)
                     # infer_intent_output:[batch, intent_size]
                     for input_seq in infer_intent_out:
-                        # pred_intents:list(max_intent)
+                        # pred_intents:list(max_intent_id)
                         pred_intents.append(np.argmax(input_seq))
                     # intent label
                     for input_seq in intents:
                         correct_intents.append(input_seq)
-                    # infer_slot_out:[batch, max_seq_length]
-                    # pred_slots:[batch, max_seq_length, 1]
+                    # infer_slot_out, crf:[batch, max_seq_length]
+                    #                 softmax:[batch, max_seq_length, slot_size]
+                    # pred_slots, crf:[batch, max_seq_length, 1]
+                    #             softmax:[batch, max_seq_length, slot_size]
                     pred_slots = infer_slot_out.reshape((slot_data.shape[0], slot_data.shape[1], -1))
                     for pred_slot, target_slot, input_seq, length in zip(pred_slots, slot_data, in_data, length):
-                        if arg.use_crf or use_batch_crossent:
-                            # p:[input_sequence_length,1] => [input_sequence_length]
+                        if arg.use_crf:
+                            # p:[max_seq_length,1] => [max_seq_length]
                             pred_slot = pred_slot.reshape([-1])
-                        else:
-                            pred_slot = np.argmax(pred_slot, 1)
+                        else: # use_batch or other
+                            # p:[max_seq_length,slot_size] => [max_seq_length]
+                            pred_slot = np.argmax(pred_slot, axis=1)
 
                         tmp_pred = []
                         tmp_correct = []
