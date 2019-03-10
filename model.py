@@ -192,6 +192,7 @@ def createModel(input_data,
 
         # ===============intent attention ============================
         """
+        计算c_I
         注意:intent attention是针对最后的hidden state进行的
         """
         # intent_input:[batch, hidden_size * 4]
@@ -262,14 +263,20 @@ def createModel(input_data,
                 # intent_output:[batch, hidden_size* 2 + hidden_size * 4]
                 intent_output = tf.concat([intent_context_hidden, intent_input], 1)
             else:
+                """
+                c_I = c_i, T代表最后时刻 encoder_final_state
+                """
                 # c_intent = context_intent
                 # intent_context_hidden:[batch, hidden_size*2]
                 intent_output = intent_context_hidden
 
+
         """
-        slot_gate=v*tanh(c_i_slot + W*c_I)
+        计算slot_gate
+        slot_gate=v*tanh(c_i^S + W*c_I)
         """
         with tf.variable_scope('slot_gated'):
+            # W*c_I
             # intent_gate:[batch, hidden_size * 2]
             intent_gate = core_rnn_cell._linear(intent_output, output_size=attn_size, bias=True) # W*c_intent
             embed_size = intent_gate.get_shape()[1].value
@@ -280,7 +287,7 @@ def createModel(input_data,
             if not remove_slot_attn: # 需要slot attention
                 """
                 需要slot attention
-                slot_context_hidden:c_i_slot, intent_gate:W*c_I
+                slot_context_hidden:c_i^S, intent_gate:W*c_I
                 
                 论文中公式(6):
                 g=sum(v*tanh(c_i + W*c^I)) 
@@ -306,13 +313,13 @@ def createModel(input_data,
 
 
             """
-            h_i+C_i*slot_gate
+            h_i+c_i^S*slot_gate
             """
             if not remove_slot_attn: # 需要slot attention
                 """
                 论文中公式(7):
-                y_i(slot)=softmax(W_hy(hi+c_i*slot_gate))
-                中的 c_i*slot_gate部分
+                y_i(slot)=softmax(W_hy(hi+c_i^S*slot_gate))
+                中的 c_i^S*slot_gate部分
                 """
                 # slot_context_hidden: [batch, input_sequence_length, hidden_size * 2]
                 # slot_gate:[batch, input_sequence_length, 1]
@@ -340,12 +347,12 @@ def createModel(input_data,
             slot_output = tf.concat([context_slot_gate, slot_inputs], axis=1)
 
     """
-    注意:上面 slot_output与paper中的公式稍有不同,此处是将h_i, C_i*slot_gate concat起来,而非相加
+    注意:上面 slot_output与paper中的公式稍有不同,此处是将h_i, c_i^S*slot_gate concat起来,而非相加
     
     原paper中公式: 
-    y_i(slot) = softmax(W_hy(h_i+C_i*slot_gate)) (7)
+    y_i(slot) = softmax(W_hy(h_i+c_i^S*slot_gate)) (7)
     or 
-    y_i(slot) = crf(W_hy(h_i+C_i*slot_gate))
+    y_i(slot) = crf(W_hy(h_i+c_i^S*slot_gate))
     """
     with tf.variable_scope('slot_proj'):
         # slot_output:[batch * input_sequence_length, hidden_size * 4]
