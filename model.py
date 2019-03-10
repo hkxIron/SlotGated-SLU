@@ -66,6 +66,7 @@ def createModel(input_data,
 
     """
     sequence output作为attention的输入
+    计算context_i,即论文中C_i^S
     """
     with tf.variable_scope('attention'):
         # state_outputs:[batch, input_sequence_length, hidden_size* 2]
@@ -172,11 +173,17 @@ def createModel(input_data,
                 score_i_k = tf.expand_dims(score_i_k, axis=-1)
                 # hidden=[batch, 1, input_sequence_length, hidden_size* 2]
                 hidden = tf.expand_dims(sequence_outputs, axis=1)
+                """
+                原论文中的C_i^S = slot_context_hidden
+                """
                 # score_i_k:[batch, input_sequence_length, input_sequence_length, 1]
                 # hidden:[batch, 1, input_sequence_length, hidden_size* 2]
                 # slot_context_hidden: [batch, input_sequence_length, hidden_size * 2]
                 slot_context_hidden = tf.reduce_sum(score_i_k * hidden, axis=[2])
-        else: # 不需attention
+        else:
+            """ 
+            不需attention,直接将sequence output作为预测slot的输入
+            """
             # attn_size = hidden size * 2
             attn_size = sequence_output_shape[2].value
             # [batch*input_sequence_length, hidden_size* 2]
@@ -195,7 +202,7 @@ def createModel(input_data,
             # hidden:[batch, input_sequence_length, 1, hidden_size*2]
             hidden = tf.expand_dims(sequence_outputs, 2)
             """
-            注意:虽然名字相同, 但与slot-attn中的不是同一个变量!!!
+            注意:虽然名字相同, 但variable_scope不同,与slot-attn中的不是同一个变量!!!
             """
 
             """
@@ -206,7 +213,6 @@ def createModel(input_data,
             # 物理意义:对hidden的各维之间进行卷积,等价于: W_{he}*h_k
             # [batch, input_sequence_length, 1, hidden_size*2]
             hidden_features = tf.nn.conv2d(input=hidden, filter=W_he, strides=[1, 1, 1, 1], padding="SAME")
-            V = tf.get_variable("intent_AttnV", shape=[attn_size])
 
 
             """
@@ -226,6 +232,7 @@ def createModel(input_data,
             # hidden_features:[batch, input_sequence_length, 1, hidden_size*2]
             # y:[batch, 1, 1, hidden_size * 2]
             # bahdanau_activate:[batch, input_sequence_length, 1, hidden_size*2]
+            V = tf.get_variable("intent_AttnV", shape=[attn_size])
             bahdanau_activate = V * tf.tanh(hidden_features + y)
             # logit_i_k:[batch, input_sequence_length]
             logit_i_k = tf.reduce_sum(bahdanau_activate, axis=[2, 3])
@@ -305,6 +312,7 @@ def createModel(input_data,
                 """
                 论文中公式(7):
                 y_i(slot)=softmax(W_hy(hi+c_i*slot_gate))
+                中的 c_i*slot_gate部分
                 """
                 # slot_context_hidden: [batch, input_sequence_length, hidden_size * 2]
                 # slot_gate:[batch, input_sequence_length, 1]
@@ -314,12 +322,18 @@ def createModel(input_data,
                 """
                 论文中公式(9):
                 y_i(slot)=softmax(W_hy(hi+h_i*slot_gate))
+                中的 c_i*slot_gate部分
                 """
                 # sequence_outputs:[batch, input_sequence_length, hidden_size* 2]
                 # context_slot_gate:[batch, input_sequence_length, hidden_size* 2]
                 context_slot_gate = sequence_outputs * slot_gate
             # context_slot_gate:[batch * input_sequence_length, attn_size=hidden_size*2]
             context_slot_gate = tf.reshape(context_slot_gate, [-1, attn_size])
+            """
+            hi+c_i*slot_gate
+            or 
+            hi+h_i*slot_gate
+            """
             # context_slot_gate:[batch * input_sequence_length, attn_size=hidden_size*2]
             # slot_inputs:[batch * input_sequence_length, hidden_size * 2]
             # slot_output:[batch * input_sequence_length, hidden_size * 4]
@@ -328,7 +342,8 @@ def createModel(input_data,
     """
     注意:上面 slot_output与paper中的公式稍有不同,此处是将h_i, C_i*slot_gate concat起来,而非相加
     
-    y_i(slot) = softmax(W_hy(h_i+C_i*slot_gate))
+    原paper中公式: 
+    y_i(slot) = softmax(W_hy(h_i+C_i*slot_gate)) (7)
     or 
     y_i(slot) = crf(W_hy(h_i+C_i*slot_gate))
     """

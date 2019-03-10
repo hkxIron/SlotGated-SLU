@@ -18,7 +18,7 @@ parser.add_argument("--num_units", type=int, default=64, help="Network size.", d
 parser.add_argument("--model_type", type=str, default='full', help="""full(default) | intent_only
                                                                     full: full attention model
                                                                     intent_only: intent attention model""")
-parser.add_argument("--use_crf", type="bool", default="false", help="""use crf for seq labeling""")
+parser.add_argument("--use_crf", type="bool", default="true", help="""use crf for seq labeling""")
 parser.add_argument("--cell", type=str, default='gru', help="""rnn cell""")
 
 # Training Environment
@@ -98,7 +98,7 @@ slot_labels = tf.placeholder(tf.int32, [None, None], name='slots') # [batch, inp
 slot_weights = tf.placeholder(tf.float32, [None, None], name='slot_weights') # [batch, input_sequence_length]
 intent_label = tf.placeholder(tf.int32, [None], name='intent') # [batch]
 
-use_batch_crossent = False
+use_batch_crossent = True
 with tf.variable_scope('model'):
     print("create train model")
     training_outputs = createModel(input_data,
@@ -150,6 +150,9 @@ with tf.variable_scope('slot_loss'):
         # crossent: [batch, input_sequence_length]
         crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=slot_labels,
                                                                   logits=slot_output_logits)
+        print("="*100)
+        print("slot_labels:", slot_labels)
+        print("slot_output_logits:", slot_output_logits)
         print("crossent:", crossent)
         # slot_weights:[batch, input_sequence_length]
         crossent_weighted = crossent*slot_weights
